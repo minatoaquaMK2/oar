@@ -751,7 +751,7 @@ interface FrameBody {
 //   user_message {input, inputId?, nativeMessageId?, turnId?, evidence} (conversation.md) |
 //   turn_active {inputId?} | input_queued {inputId} |
 //   input_handled {requestId, inputId?} |
-//   input_dropped {requestId?, inputId?, reason: "turn_interrupted"} |
+//   input_dropped {requestId?, inputId?, reason: "turn_interrupted" | "never_sent"} |
 //   input_dropped {requestId?, inputId?, reason: "runtime_refused", failure?: FailureClass, message?: string} (at least one ID; conversation.md) |
 //   session_linked {parent, child, via: "tool_call"} |
 //   text_delta {text, messageId?, phase?} | reasoning {content, messageId?} |
@@ -1033,8 +1033,8 @@ Which runtimes say which kinds (runtime pages hold the evidence):
   attempt outside the normal prompt path. It is separate from delivery
   acceptance, model consumption and turn completion. Pi SDK/RPC report it
   from native prompt and steer dispositions; [details](#native-input-disposition).
-- `input_dropped`: native evidence that the input was interrupted before
-  delivery, or refused. `inputId` is optional when `requestId` identifies the
+- `input_dropped`: evidence that the input was interrupted before
+  delivery, never sent by its adapter, or refused. `inputId` is optional when `requestId` identifies the
   attempt; at least one identifier is required. Only `reason: "runtime_refused"` permits optional
   `failure` and `message`. Input-scoped waits use them for the failed outcome;
   absent fields yield `unknown` / `runtime refused the input`. An interruption

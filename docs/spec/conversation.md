@@ -250,8 +250,8 @@ view: the records and flat events retain their original order.
 
 ## Dropped input
 
-`input_dropped` is a native discard event with
-`reason: "turn_interrupted" | "runtime_refused"`. It identifies the exact
+`input_dropped` records an input discard with reason `turn_interrupted`,
+`runtime_refused`, or `never_sent`. It identifies the exact
 attempt with `requestId`, or the logical input with `inputId` on older
 adapters. At least one reference is required; both may be present.
 For `runtime_refused` only, optional `failure: FailureClass` and `message`
@@ -259,8 +259,11 @@ retain the classification and explanation supplied by the adapter. An
 input-scoped wait returns a failed outcome using those fields, defaulting
 to `unknown` and `runtime refused the input` when absent; an interruption
 returns `aborted`. Neither case synthesizes a `turn_ended`.
-Only an adapter with native evidence of discard emits it, on the frame
-that proves the discard. A turn ending alone says nothing about unread input.
+An adapter emits it on the frame that proves the discard. Shared ACP emits
+`never_sent` for admitted entries still held by the adapter at teardown.
+It is proof of no dispatch, not merely the absence of an echo. Entries
+already withdrawn or removed for dispatch do not qualify. An input-scoped
+wait fails with `runtime_exited` and an explicit unsent reason. A turn ending alone says nothing about unread input.
 Codex emits it on an interrupted root `turn/completed`, before `turn_ended`,
 for accepted steers to that turn with no user-message echo. It does not
 apply to Codex's durable queue, another turn, or an echoed steer. Factory

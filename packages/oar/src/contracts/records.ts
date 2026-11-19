@@ -139,7 +139,7 @@ export type RuntimeEventBody =
   /** The runtime holds this input and has not started its turn. Native queue evidence gates input-specific turn attribution; control acceptance alone does not. */
   | { readonly kind: "input_queued"; readonly inputId: string }
   /** The runtime discarded or refused an accepted input, established by native evidence. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
-  | ({ readonly kind: "input_dropped"; readonly reason: "turn_interrupted" } & InputReference)
+  | ({ readonly kind: "input_dropped"; readonly reason: "turn_interrupted" | "never_sent" } & InputReference)
   /** A native refusal's classification and explanation, only when known. An input-scoped wait reads these as a failure, never as a turn_ended fact. */
   | ({ readonly kind: "input_dropped"; readonly reason: "runtime_refused"; readonly failure?: FailureClass; readonly message?: string } & InputReference)
   /** Native handling of this delivery attempt without a model turn. Not success, model consumption, or a turn end. Handler errors remain separate native facts. */

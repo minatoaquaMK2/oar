@@ -86,6 +86,7 @@ export function inputWait(afterSeq: number, inputId?: string, boundRequest?: str
 }
 
 export function droppedOutcome(event: { readonly reason: string; readonly failure?: FailureClass; readonly message?: string }): TurnOutcome {
+  if (event.reason === "never_sent") { return { kind: "failed", failure: "runtime_exited", reason: "adapter never sent the input" }; }
   return event.reason === "turn_interrupted" ? { kind: "aborted" }
     : { kind: "failed", failure: event.failure ?? "unknown", reason: event.message ?? "runtime refused the input" };
 }

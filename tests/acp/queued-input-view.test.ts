@@ -16,6 +16,8 @@ test.each([undefined, "11111111-1111-4111-8111-111111111111"])("ACP queue dispat
   const queued = await kernel.control({ kind: "queue", input: "held", ...(inputId === undefined ? {} : { inputId }) }, async request => turns.hold("held", undefined, inputId, request));
   await vi.waitFor(() => { expect(kernel.records().at(-1)).toMatchObject({ kind: "frame", body: { events: [{ kind: "turn_ended" }] } }); });
   expect(send).toHaveBeenCalledTimes(1);
+  turns.onExit();
+  expect(kernel.records().some(record => record.kind === "frame" && record.body.events.some(event => event.kind === "input_dropped"))).toBe(false);
   const view = kernel.records().reduce((state, record) => reduceSessionView(state, record, "stream"), initialSessionView());
   expect(view.messages.map(message => message.kind)).toEqual(["input", "turn"]);
   const [input] = view.messages;
@@ -44,4 +46,35 @@ test("ACP queue held before runtime.spawned settles is immediately withdrawable 
   await vi.waitFor(() => { expect(kernel.records().at(-1)).toMatchObject({ kind: "frame", body: { events: [{ kind: "turn_ended" }] } }); });
   expect(send).toHaveBeenCalledTimes(1);
   expect(send).toHaveBeenCalledWith("session/prompt", { sessionId: "root", prompt: [{ type: "text", text: "kept" }] }, undefined);
+});
+
+test("ACP exit drops an accepted unsent queue exactly once and preserves the original receipt", async () => {
+  const kernel = createSessionKernel("root");
+  const send = vi.fn(async () => ({ stopReason: "end_turn" }));
+  const spawn = Promise.withResolvers<void>();
+  // oxlint-disable-next-line typescript/consistent-type-assertions, typescript/no-unsafe-type-assertion -- Keep dispatch behind the mock transport startup.
+  const runtime = { spawned: spawn.promise, closed: false, connection: { agent: { request: send } } } as unknown as AcpProcess;
+  const turns = createAcpTurns({ kernel, runtime, profile: profile(), usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+  const inputId = "33333333-3333-4333-8333-333333333333";
+  const queued = await kernel.control({ kind: "queue", input: "held", inputId }, request => turns.hold("held", undefined, inputId, request));
+  const withdrawnId = "44444444-4444-4444-8444-444444444444";
+  await kernel.control({ kind: "queue", input: "withdrawn", inputId: withdrawnId }, request => turns.hold("withdrawn", undefined, withdrawnId, request));
+  await kernel.control({ kind: "withdraw", inputId: withdrawnId }, () => turns.withdraw(withdrawnId));
+  let live = initialSessionView();
+  kernel.rawEvents(record => { live = reduceSessionView(live, record, "stream"); }, { sessionId: "root", afterSeq: -1 });
+  turns.onExit();
+  kernel.processExited(1);
+  turns.onExit();
+  spawn.resolve();
+  await Promise.resolve();
+  expect(send).not.toHaveBeenCalled();
+  const records = kernel.records();
+  const drops = records.flatMap(record => record.kind === "frame" ? record.body.events.filter(event => event.kind === "input_dropped") : []);
+  expect(drops).toEqual([{ kind: "input_dropped", reason: "never_sent", requestId: queued.request.id, inputId }]);
+  const replay = records.reduce((state, record) => reduceSessionView(state, record, "stream"), initialSessionView());
+  expect(live.messages).toEqual(replay.messages);
+  expect(replay.messages.find(message => message.kind === "input" && message.input.inputId === inputId)).toMatchObject({
+    kind: "input", input: { inputId, state: "dropped", reason: "never_sent",
+      attempts: [{ request: queued.request, response: queued.response, streamId: "stream", state: "accepted" }] },
+  });
 });

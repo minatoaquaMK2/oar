@@ -30,6 +30,7 @@ class InterruptBatch {
   readonly done = this.completion.promise;
   private readonly ended = Promise.withResolvers<void>();
   private readonly tools = new Set<string>();
+  private readonly unsentRequests = new Set<string>();
   private readonly queued: Promise<ControlOutcome>[] = [];
   private readonly withdrawals = new Map<string, { readonly input: DeliverMergeInput; readonly result: Promise<ControlOutcome> }>();
   private readonly stop: () => void;
@@ -93,6 +94,7 @@ class InterruptBatch {
     for (const event of record.body.events) {
       if (event.kind === "tool_call_started") { this.tools.add(event.callId); }
       if (event.kind === "tool_call_ended") { this.tools.delete(event.callId); }
+      if (event.kind === "input_dropped" && event.reason === "never_sent" && event.requestId !== undefined) { this.unsentRequests.add(event.requestId); }
       if (event.kind === "turn_ended") { this.nativeEnd = true; this.ended.resolve(); }
     }
   }
@@ -127,6 +129,17 @@ class InterruptBatch {
       this.takeHeld();
       const taken = await Promise.all([...this.withdrawals.values()].map(async (entry) => ({ input: entry.input, result: await entry.result })));
       inputs = taken.filter((entry) => entry.result.kind === "accepted" || (entry.result.code === "runtime_exited" || entry.result.code === "disposed" || entry.result.code === "session_released")).map((entry) => entry.input);
+      if ((this.exited || this.released || this.disposed) && this.unsentRequests.size > 0) {
+        const withdrawn = new Set(inputs.map(input => input.inputId));
+        const ids = [...conversationOf(this.session.records()).inputs.values()]
+          .filter(input => input.inputId !== undefined && (withdrawn.has(input.inputId) ||
+            (input.reason === "never_sent" && this.unsentRequests.has(input.attempts.at(-1)?.request.id ?? ""))))
+          .toSorted((a, b) => (a.attempts[0]?.request.seq ?? 0) - (b.attempts[0]?.request.seq ?? 0))
+          .flatMap(input => input.inputId === undefined ? [] : [input.inputId]);
+        this.finish(this.failure(this.disposed ? "disposed" : (this.exited ? "runtime_exited" : "session_released"),
+          "runtime did not remain available; inputs were not redelivered", ids));
+        return;
+      }
       const failure = taken.find((entry) => entry.result.kind === "rejected" && entry.result.code !== "not_queued");
       if (failure?.result.kind === "rejected") {
         this.finish(this.failure(failure.result.code, failure.result.reason, inputs.map((value) => value.inputId), failure.result));

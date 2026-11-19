@@ -72,6 +72,17 @@ export function createAcpTurns(deps: {
   const { kernel, runtime, profile, usageGate, capabilities, promptUsage, promptMeta } = deps;
   const rootId = kernel.sessionId;
   const held: { readonly inputId: string | undefined; readonly input: string; readonly images: readonly InputImage[] | undefined; readonly request: RequestRecord; readonly prompt: JsonRecord[]; accepted: boolean }[] = [];
+  const dropHeld = (): void => {
+    // Remove ownership before publishing: a synchronous observer can reenter cleanup.
+    const events: RuntimeEventBody[] = [];
+    for (const entry of held.splice(0)) {
+      if (entry.accepted) {
+        events.push({ kind: "input_dropped", reason: "never_sent", requestId: entry.request.id,
+          ...(entry.inputId === undefined ? {} : { inputId: entry.inputId }) });
+      }
+    }
+    if (events.length > 0) { kernel.frame({ type: "acp/held_dropped", native: null, events }); }
+  };
   let dispatching = false;
   let spawned = false;
   // oxlint-disable-next-line promise/prefer-await-to-then, promise/always-return -- Drain once the child comes up without delaying queue admission.
@@ -279,7 +290,6 @@ export function createAcpTurns(deps: {
         state.fallback = setTimeout(() => {
           if (active === state) {
             if (deps.fallback !== undefined && request !== undefined) {
-              closeTurn(state); held.splice(0);
               void deps.fallback(request);
             } else { runtime.kill(); }
           }
@@ -302,7 +312,7 @@ export function createAcpTurns(deps: {
       if (active !== null) {
         closeTurn(active);
       }
-      held.splice(0);
+      dropHeld();
     },
   };
 }

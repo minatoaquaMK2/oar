@@ -114,7 +114,7 @@ export function finishAcpSession(
   const promptUsage = (response: JsonRecord): RuntimeEventBody | null => tokenUsage.prompt(response, opened.initialized);
   const turns = createAcpTurns({ operationBusy: () => compaction?.busy() === true, kernel, runtime, profile, usageGate, capabilities, promptMeta: profile.promptMeta?.(options), promptUsage,
     ...(nativeTurns === undefined ? {} : { native: { promptParams: (inputId: string | undefined): JsonRecord => ({ _meta: nativeTurns.name(inputId) }), afterClose: nativeTurns.afterOarTurn } }),
-    ...(ownership === undefined ? {} : { fallback: async (request: RequestRecord): Promise<void> => { ownership.stopRequests(); await lifecycle?.abortFallback(request); } }),
+    ...(ownership === undefined ? {} : { fallback: async (request: RequestRecord): Promise<void> => { ownership.stopRequests(); turns.onExit(); await lifecycle?.abortFallback(request); } }),
   });
   // The runtime's own turn is the active turn: prompt is busy, held input waits, steer and abort reach it.
   nativeTurns?.bind({ active: () => turns.active(), adopt: () => turns.beginOperation(null), release: (turn) => {
@@ -155,7 +155,7 @@ export function finishAcpSession(
     catch (error) { kernel.respond("", { kind: "cleanup", result: { kind: "failed", reason: error instanceof Error ? error.message : String(error) } }); }
   };
   const observedLease = ownership === undefined ? undefined : { ...ownership.lease, onExit: (listener: (code: number | null) => void): (() => void) => ownership.lease.onExit((code) => {
-    listener(code); turns.onExit(); void disposeTerminals();
+    turns.onExit(); listener(code); void disposeTerminals();
   }) };
   const lifecycle = observedLease === undefined || ownership === undefined ? undefined : processSessionLifecycle(kernel, observedLease, ownership.cleanup, 5000);
   // oxlint-disable-next-line promise/prefer-await-to-then, promise/always-return -- Exit observation outlives session creation.
@@ -164,8 +164,8 @@ export function finishAcpSession(
     // An outcome only oar observes: answers our dispose when we caused the
     // exit, stands alone (requestId "") when the runtime died on its own.
     const reason = cleanupFailureReason(runtime.diagnostics().cleanup);
-    kernel.processExited(code, reason);
     turns.onExit();
+    kernel.processExited(code, reason);
   }); }
 
   // Reachability (exited, disposed) is the kernel's gate, read off the
